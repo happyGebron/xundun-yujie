@@ -1,12 +1,12 @@
 # Xundun Yujie | Integrated Air-Ground Intelligent Dam Patrol System
 
-[中文说明](README.md) · `V1.0.0` · Apache-2.0
+[中文说明](README.md) · `V1.1.0` · Apache-2.0
 
 Xundun Yujie is a **software prototype for digital-twin visualization, explainable AI risk scoring, and air-ground coordination** in dam patrol scenarios. It combines visual cues, thermal anomalies, and sensor time-series signals into an interpretable score, then demonstrates UAV scanning, UGV verification, task assignment, route planning, and degraded communication states in one command console.
 
 This repository contains software source code and synthetic demo data only. It does not include original planning materials, real engineering data, device drivers, hardware integration, or claims of field deployment.
 
-## V1.0.0 capabilities
+## V1.1.0 capabilities
 
 | Area | Runnable capability |
 | --- | --- |
@@ -14,7 +14,7 @@ This repository contains software source code and synthetic demo data only. It d
 | Air-ground coordination | UAV coverage scan, UGV verification tasks, and minimum-cost assignment |
 | Planning and control | A* global route planning with DWA local speed and heading updates |
 | Communication resilience | Simulated MESH health, aerial relay, link degradation, and offline-cache state |
-| Command UI | Dam digital-twin map, risk review, coordination controls, and event playback |
+| Command UI | Continuous dam digital-twin workspace, risk inspector, coordination controls, and event playback |
 
 ## Run locally
 
@@ -69,7 +69,7 @@ frontend/src/styles.css Visual system and responsive styling
 
 ## Next integration boundary
 
-V1.0.0 closes the software-prototype loop. Future adapters for cameras, thermal sensors, flight control, robot chassis, message buses, or engineering-data platforms should be isolated from the core domain and accompanied by data governance, access control, auditing, fault tolerance, and field-safety validation.
+V1.1.0 closes the software-prototype loop and improves the usability of its high-density command interface. Future adapters for cameras, thermal sensors, flight control, robot chassis, message buses, or engineering-data platforms should be isolated from the core domain and accompanied by data governance, access control, auditing, fault tolerance, and field-safety validation.
 
 ## License
 

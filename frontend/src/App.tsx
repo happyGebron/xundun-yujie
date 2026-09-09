@@ -9,7 +9,9 @@ import {
   ClipboardCheck,
   Clock3,
   Crosshair,
-  MapPinned,
+  Gauge,
+  History,
+  Map,
   Pause,
   Plane,
   Play,
@@ -17,6 +19,7 @@ import {
   RotateCcw,
   Route,
   ShieldAlert,
+  Signal,
   Waves,
   Wifi,
 } from 'lucide-react'
@@ -57,14 +60,20 @@ type State = {
   summary: { risk_count: number; high_risk_count: number; online_agents: number; coverage: number }
 }
 
-type Tab = '态势总览' | '风险复核' | '协同控制' | '任务记录'
+type View = 'overview' | 'risks' | 'coordination' | 'history'
 
-const tabs: Tab[] = ['态势总览', '风险复核', '协同控制', '任务记录']
+const navigation = [
+  { id: 'overview' as const, label: '态势', icon: Map },
+  { id: 'risks' as const, label: '风险', icon: ShieldAlert },
+  { id: 'coordination' as const, label: '协同', icon: Route },
+  { id: 'history' as const, label: '记录', icon: History },
+]
+
 const faultOptions = [
-  ['mesh', '模拟链路衰减'],
-  ['obstacle', '模拟动态障碍'],
-  ['thermal', '模拟热源漂移'],
-  ['gps', '模拟定位降级'],
+  ['mesh', '链路衰减'],
+  ['obstacle', '动态障碍'],
+  ['thermal', '热源漂移'],
+  ['gps', '定位降级'],
 ] as const
 
 async function request(path: string, method = 'GET'): Promise<State> {
@@ -82,59 +91,109 @@ function formatPercent(value: number) {
   return `${Math.round(value * 100)}%`
 }
 
-function MapCanvas({ agents, risks }: Pick<State, 'agents' | 'risks'>) {
+function mapPoint(point: [number, number]) {
+  return [55 + point[0] * 50, 65 + point[1] * 48]
+}
+
+function SignalChart({ signal }: { signal: number[] }) {
+  const points = signal.map((value, index) => `${index * (260 / Math.max(signal.length - 1, 1))},${72 - value * 62}`).join(' ')
+  return (
+    <svg className="signal-chart" viewBox="0 0 260 84" role="img" aria-label="所选事件的传感器时间序列">
+      <path d="M0 72 H260 M0 42 H260 M0 12 H260" className="chart-grid" />
+      <polyline points={points} className="chart-line" />
+    </svg>
+  )
+}
+
+function DamMap({ agents, risks, running, selectedRisk, onSelectRisk }: {
+  agents: Agent[]
+  risks: Risk[]
+  running: boolean
+  selectedRisk: string
+  onSelectRisk: (id: string) => void
+}) {
   const horizontalLines = Array.from({ length: 11 }, (_, index) => index)
   const verticalLines = Array.from({ length: 19 }, (_, index) => index)
   return (
-    <div className="map-wrap">
-      <svg className="dam-map" viewBox="0 0 900 500" role="img" aria-label="巡坝仿真区域，包括坝体、禁行区、巡检单元和风险事件">
-        <rect x="0" y="0" width="900" height="500" className="map-bg" />
-        {horizontalLines.map((line) => <line key={`h${line}`} x1="0" x2="900" y1={line * 50} y2={line * 50} className="grid-line" />)}
-        {verticalLines.map((line) => <line key={`v${line}`} y1="0" y2="500" x1={line * 50} x2={line * 50} className="grid-line" />)}
-        <path d="M52 88 L850 88 L805 158 L97 158 Z" className="dam-body" />
-        <path d="M97 158 L805 158 L748 230 L156 230 Z" className="dam-shadow" />
-        <path d="M0 330 C160 275 275 382 436 330 C620 272 720 371 900 300 L900 500 L0 500 Z" className="water-line" />
+    <div className={`map-viewport ${running ? 'running' : ''}`}>
+      <svg className="dam-map" viewBox="0 0 1000 600" role="img" aria-label="坝区数字孪生态势图，可选择风险事件">
+        <rect width="1000" height="600" className="map-bg" />
+        <path d="M0 70 C180 18 354 58 520 28 C730 -8 840 40 1000 12 L1000 0 L0 0 Z" className="ridge far" />
+        <path d="M0 126 C148 76 282 126 450 84 C632 38 810 112 1000 56 L1000 0 L0 0 Z" className="ridge near" />
+        {horizontalLines.map((line) => <line key={`h${line}`} x1="50" x2="950" y1={50 + line * 48} y2={50 + line * 48} className="grid-line" />)}
+        {verticalLines.map((line) => <line key={`v${line}`} y1="50" y2="530" x1={50 + line * 50} x2={50 + line * 50} className="grid-line" />)}
+        <path d="M0 385 C170 328 310 430 486 368 C676 302 800 405 1000 332 L1000 600 L0 600 Z" className="reservoir" />
+        <path d="M76 168 L914 168 L858 236 L132 236 Z" className="dam-crest" />
+        <path d="M132 236 L858 236 L786 326 L204 326 Z" className="dam-face" />
+        <path d="M204 326 L786 326" className="dam-base" />
+        <path d="M442 168 L470 326 M530 168 L558 326" className="spillway" />
         <g aria-label="禁行障碍区">
-          <rect x="300" y="100" width="100" height="100" className="obstacle" />
-          <rect x="550" y="300" width="150" height="50" className="obstacle" />
+          <path d="M342 142 H442 V238 H342 Z M592 334 H742 V382 H592 Z" className="restricted" />
+          <path d="M350 152 L432 228 M432 152 L350 228 M602 342 L732 374 M732 342 L602 374" className="restricted-mark" />
+        </g>
+        <g className="coordinate-labels" aria-hidden="true">
+          <text x="50" y="552">00</text><text x="490" y="552">09</text><text x="930" y="552">18</text>
+          <text x="20" y="58">00</text><text x="20" y="298">05</text><text x="20" y="530">10</text>
         </g>
         {agents.map((agent) => {
-          const [x, y] = agent.position
-          const cx = 25 + x * 50
-          const cy = 25 + y * 50
+          const routePoints = agent.route.map((point) => mapPoint(point).join(',')).join(' ')
+          const [cx, cy] = mapPoint(agent.position)
           return (
-            <g key={agent.id} className={`agent-node ${agent.type.toLowerCase()}`}>
-              {agent.type === 'UAV' ? <path d={`M${cx - 10} ${cy} L${cx} ${cy - 10} L${cx + 10} ${cy} L${cx} ${cy + 10} Z`} /> : <rect x={cx - 8} y={cy - 8} width="16" height="16" rx="3" />}
-              <text x={cx + 12} y={cy - 10}>{agent.id}</text>
+            <g key={agent.id}>
+              {routePoints && <polyline points={routePoints} pathLength="1" className={`route-line ${agent.type.toLowerCase()}`} />}
+              <g className={`agent-node ${agent.type.toLowerCase()}`} style={{ transform: `translate(${cx}px, ${cy}px)` }}>
+                {agent.type === 'UAV' ? <path d="M-9 0 L0 -9 L9 0 L0 9 Z" /> : <rect x="-7" y="-7" width="14" height="14" rx="2" />}
+                <path d="M12 -13 H36" className="node-leader" />
+                <text x="40" y="-9">{agent.id}</text>
+              </g>
             </g>
           )
         })}
         {risks.map((risk) => {
-          const [x, y] = risk.position
-          return <g key={risk.id} className={`risk-marker ${riskClass(risk.severity)}`}><circle cx={25 + x * 50} cy={25 + y * 50} r="10" /><circle cx={25 + x * 50} cy={25 + y * 50} r="18" className="risk-ring" /></g>
+          const [cx, cy] = mapPoint(risk.position)
+          const selected = risk.id === selectedRisk
+          const reviewed = risk.status === '人工确认'
+          return (
+            <g
+              key={risk.id}
+              className={`risk-node ${riskClass(risk.severity)} ${selected ? 'selected' : ''} ${reviewed ? 'reviewed' : ''}`}
+              style={{ transform: `translate(${cx}px, ${cy}px)` }}
+              role="button"
+              tabIndex={0}
+              aria-label={`${risk.id}，${risk.name}，${risk.severity}风险，${risk.status}`}
+              onClick={() => onSelectRisk(risk.id)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault()
+                  onSelectRisk(risk.id)
+                }
+              }}
+            >
+              <circle r="19" className="risk-halo" />
+              <path d="M0 -10 L9 8 H-9 Z" className="risk-symbol" />
+              <circle r="2.5" cy="3" className="risk-core" />
+              <path d="M13 12 H45" className="node-leader" />
+              <text x="49" y="16">{risk.id}</text>
+            </g>
+          )
         })}
+        {running && <rect x="50" y="50" width="900" height="2" className="scan-line" />}
       </svg>
-      <div className="map-legend" aria-label="地图图例">
-        <span><i className="legend-uav" />空中巡检</span>
-        <span><i className="legend-ugv" />地面复核</span>
-        <span><i className="legend-risk" />风险事件</span>
-      </div>
+      <div className="map-heading"><p>实时任务工作面</p><h1>坝区协同态势</h1></div>
+      <div className="map-tools" aria-label="地图状态"><Crosshair aria-hidden="true" /><span>18 × 10 仿真网格</span></div>
+      <div className="map-legend" aria-label="地图图例"><span><i className="uav-key" />UAV 航迹</span><span><i className="ugv-key" />UGV 路径</span><span><i className="risk-key" />风险点</span></div>
     </div>
   )
 }
 
-function Metric({ label, value, detail, tone }: { label: string; value: string; detail: string; tone?: string }) {
-  return <section className={`metric ${tone ?? ''}`} aria-label={`${label}：${value}`}><p>{label}</p><strong>{value}</strong><span>{detail}</span></section>
-}
-
-function SignalChart({ signal }: { signal: number[] }) {
-  const points = signal.map((value, index) => `${index * 26},${80 - value * 75}`).join(' ')
-  return <svg className="signal-chart" viewBox="0 0 300 96" role="img" aria-label="传感器时间序列示意图"><path d="M0 80 H300" className="chart-grid" /><polyline points={points} className="chart-line" /></svg>
+function Metric({ label, value, detail, attention = false }: { label: string; value: string; detail: string; attention?: boolean }) {
+  return <div className={`metric ${attention ? 'attention' : ''}`}><span>{label}</span><strong>{value}</strong><small>{detail}</small></div>
 }
 
 function App() {
   const [state, setState] = useState<State | null>(null)
-  const [activeTab, setActiveTab] = useState<Tab>('态势总览')
+  const [activeView, setActiveView] = useState<View>('overview')
+  const [selectedRiskId, setSelectedRiskId] = useState('R-021')
   const [message, setMessage] = useState('正在连接本地仿真 API…')
   const [error, setError] = useState('')
   const [isPending, startTransition] = useTransition()
@@ -171,62 +230,81 @@ function App() {
     return () => window.clearInterval(timer)
   }, [runAction, state?.mission.status])
 
-  const focusRisk = useMemo(() => state?.risks.find((risk) => risk.severity === '高') ?? state?.risks[0], [state])
+  const selectedRisk = useMemo(() => state?.risks.find((risk) => risk.id === selectedRiskId) ?? state?.risks[0], [selectedRiskId, state])
   const isRunning = state?.mission.status === '执行中'
 
   if (!state) {
     return <main className="loading-screen" aria-live="polite"><Activity aria-hidden="true" /><p>{error || message}</p><button type="button" onClick={() => void load()}>重新连接 API</button></main>
   }
 
+  const riskInspector = selectedRisk && (
+    <>
+      <div className="inspector-title"><div><p className="section-kicker">当前事件</p><h2>{selectedRisk.id}</h2></div><span className={`severity ${riskClass(selectedRisk.severity)}`}>{selectedRisk.severity}风险</span></div>
+      <div className="risk-summary"><p>{selectedRisk.name}</p><span>{selectedRisk.kind} · {selectedRisk.status}</span><strong>{formatPercent(selectedRisk.score)}</strong><small>多源融合评分</small></div>
+      <div className="evidence-bars" aria-label="风险证据构成">
+        <div><span>视觉边缘</span><b>{formatPercent(selectedRisk.rgb)}</b><i><em style={{ width: formatPercent(selectedRisk.rgb) }} /></i></div>
+        <div><span>热成像温差</span><b>{selectedRisk.thermal_delta}°C</b><i><em style={{ width: `${Math.min(100, selectedRisk.thermal_delta / 15 * 100)}%` }} /></i></div>
+        <div><span>频域异常</span><b>{formatPercent(selectedRisk.spectrum)}</b><i><em style={{ width: formatPercent(selectedRisk.spectrum) }} /></i></div>
+      </div>
+    </>
+  )
+
   return (
     <div className="app-shell">
-      <a className="skip-link" href="#command-center">跳转到指挥主界面</a>
+      <a className="skip-link" href="#operations-map">跳转到任务工作面</a>
       <header className="topbar">
-        <a className="brand" href="#command-center" aria-label="巡盾御界主页"><span className="brand-mark"><ShieldAlert aria-hidden="true" /></span><span>巡盾御界<small>智能巡坝指挥台</small></span></a>
-        <div className="mission-meta"><span className={`status-dot ${isRunning ? 'live' : ''}`} />{state.mission.status}<span>·</span><span className="mono">{state.mission.id}</span></div>
-        <div className="topbar-actions">
-          <span className="connection"><Wifi aria-hidden="true" />MESH {state.mesh.health}%</span>
-          <button type="button" className="button secondary" disabled={isPending} onClick={() => runAction('/api/mission/reset', '场景已重置')}><RotateCcw aria-hidden="true" />重置场景</button>
-          <button type="button" className="button primary" disabled={isPending} onClick={() => runAction(isRunning ? '/api/mission/pause' : '/api/mission/start', isRunning ? '任务已暂停' : '协同任务已启动')}>{isRunning ? <Pause aria-hidden="true" /> : <Play aria-hidden="true" />}{isRunning ? '暂停任务' : '启动任务'}</button>
-        </div>
+        <a className="brand" href="#operations-map" aria-label="巡盾御界主页"><ShieldAlert aria-hidden="true" /><span>巡盾御界<small>智能巡坝指挥台</small></span></a>
+        <div className="mission-state"><span className={`live-dot ${isRunning ? 'active' : ''}`} /><div><b>{state.mission.status}</b><small className="mono">{state.mission.id}</small></div></div>
+        <div className="top-metrics" aria-label="任务摘要"><span>周期<b>{state.mission.cycle}</b></span><span>覆盖<b>{state.summary.coverage}%</b></span><span>链路<b>{state.mesh.health}%</b></span></div>
+        <div className="top-actions"><button type="button" className="icon-button" aria-label="重置场景" title="重置场景" disabled={isPending} onClick={() => runAction('/api/mission/reset', '场景已重置')}><RotateCcw aria-hidden="true" /></button><button type="button" className="primary-action" disabled={isPending} onClick={() => runAction(isRunning ? '/api/mission/pause' : '/api/mission/start', isRunning ? '任务已暂停' : '协同任务已启动')}>{isRunning ? <Pause aria-hidden="true" /> : <Play aria-hidden="true" />}{isRunning ? '暂停任务' : '启动任务'}</button></div>
       </header>
 
-      <nav className="tabbar" aria-label="主导航">
-        {tabs.map((tab) => <button key={tab} type="button" aria-pressed={activeTab === tab} className={activeTab === tab ? 'active' : ''} onClick={() => setActiveTab(tab)}>{tab}</button>)}
-        <span className="refresh-note" role="status" aria-atomic="true"><Clock3 aria-hidden="true" />{state.mission.updated_at}</span>
-      </nav>
+      <nav className="mobile-viewbar" aria-label="移动端工作区导航">{navigation.map(({ id, label }) => <button key={id} type="button" aria-pressed={activeView === id} onClick={() => setActiveView(id)}>{label}</button>)}</nav>
 
-      <main id="command-center" className="command-center">
-        <section className="metrics-grid" aria-label="任务关键指标">
-          <Metric label="风险队列" value={`${state.summary.risk_count} 项`} detail={`${state.summary.high_risk_count} 项高风险`} tone="attention" />
-          <Metric label="巡检覆盖" value={`${state.summary.coverage}%`} detail={`第 ${state.mission.cycle} 个控制周期`} />
-          <Metric label="在线单元" value={`${state.summary.online_agents}/${state.agents.length}`} detail="空地节点实时协同" />
-          <Metric label="链路健康度" value={`${state.mesh.health}%`} detail={state.mesh.fault ? '故障降级模式' : state.mesh.mode} tone={state.mesh.health < 70 ? 'attention' : ''} />
+      <main className="workspace">
+        <nav className="side-rail" aria-label="工作区导航">
+          {navigation.map(({ id, label, icon: Icon }) => <button key={id} type="button" aria-pressed={activeView === id} onClick={() => setActiveView(id)}><Icon aria-hidden="true" /><span>{label}</span></button>)}
+          <div className="rail-connection" title={`MESH 链路健康度 ${state.mesh.health}%`}><Wifi aria-hidden="true" /><span>{state.mesh.health}</span></div>
+        </nav>
+
+        <section className="map-region" id="operations-map" aria-label="数字孪生任务地图">
+          <DamMap agents={state.agents} risks={state.risks} running={isRunning} selectedRisk={selectedRisk?.id ?? ''} onSelectRisk={(id) => { setSelectedRiskId(id); setActiveView('overview') }} />
+          <div className="telemetry-band" aria-label="实时任务指标">
+            <Metric label="风险队列" value={`${state.summary.risk_count}`} detail={`${state.summary.high_risk_count} 项需优先处置`} attention={state.summary.high_risk_count > 0} />
+            <Metric label="在线单元" value={`${state.summary.online_agents}/${state.agents.length}`} detail="空地节点协同" />
+            <Metric label="局部速度" value={`${state.last_control.speed_mps}`} detail={`${state.last_control.method} · m/s`} />
+            <Metric label="安全净空" value={`${state.last_control.clearance_cells}`} detail="障碍栅格" />
+          </div>
+          <div className="agent-band" aria-label="执行单元状态">
+            {state.agents.map((agent) => <div key={agent.id} className="agent-status"><span>{agent.type === 'UAV' ? <Plane aria-hidden="true" /> : <Bot aria-hidden="true" />}</span><div><b>{agent.id}</b><small>{agent.mode}</small></div><dl><div><dt><Battery aria-hidden="true" />电量</dt><dd>{agent.battery}%</dd></div><div><dt><Signal aria-hidden="true" />链路</dt><dd>{agent.link}%</dd></div></dl></div>)}
+          </div>
         </section>
 
-        {activeTab === '态势总览' && <section className="work-grid">
-          <div className="map-panel panel">
-            <div className="panel-head"><div><p className="eyebrow">实时态势</p><h1>坝段数字孪生图</h1></div><span className="mono control-badge"><Crosshair aria-hidden="true" />坐标网格 18×10</span></div>
-            <MapCanvas agents={state.agents} risks={state.risks} />
-            <div className="control-strip"><span><Route aria-hidden="true" />全局规划：A*</span><span><Waves aria-hidden="true" />局部控制：{state.last_control.method}</span><span><Activity aria-hidden="true" />速度 {state.last_control.speed_mps} m/s</span><button type="button" className="text-button" disabled={isPending} onClick={() => runAction('/api/simulation/tick', '手动推进一个控制周期')}>推进一周期<ChevronRight aria-hidden="true" /></button></div>
-          </div>
-          <aside className="side-stack" aria-label="风险与单元状态">
-            <section className="panel focus-risk">
-              <div className="panel-head compact"><div><p className="eyebrow">优先处置</p><h2>{focusRisk?.id}</h2></div><span className={`severity ${focusRisk ? riskClass(focusRisk.severity) : ''}`}>{focusRisk?.severity}风险</span></div>
-              {focusRisk && <><h3>{focusRisk.name}</h3><p className="muted">{focusRisk.kind} · 融合评分 {formatPercent(focusRisk.score)}</p><div className="evidence-row"><span>RGB 边缘能量<strong>{formatPercent(focusRisk.rgb)}</strong></span><span>温差<strong>{focusRisk.thermal_delta}°C</strong></span><span>频域异常<strong>{formatPercent(focusRisk.spectrum)}</strong></span></div><button type="button" className="button secondary wide" disabled={isPending} onClick={() => runAction(`/api/risks/${focusRisk.id}/review`, `${focusRisk.id} 已人工确认`)}><ClipboardCheck aria-hidden="true" />确认风险事件</button></>}
-            </section>
-            <section className="panel agent-panel"><div className="panel-head compact"><div><p className="eyebrow">执行单元</p><h2>空地编组</h2></div><Radio aria-hidden="true" /></div>{state.agents.map((agent) => <div className="agent-row" key={agent.id}><span className={`agent-icon ${agent.type.toLowerCase()}`}>{agent.type === 'UAV' ? <Plane aria-hidden="true" /> : <Bot aria-hidden="true" />}</span><div><strong>{agent.id}</strong><p>{agent.mode}</p></div><div className="agent-data"><span><Battery aria-hidden="true" />{agent.battery}%</span><span><Wifi aria-hidden="true" />{agent.link}%</span></div></div>)}</section>
-          </aside>
-        </section>}
+        <aside className="inspector" aria-label="任务检查器">
+          {activeView === 'overview' && <>
+            <section className="inspector-section">{riskInspector}<button type="button" className="review-action" disabled={isPending || selectedRisk?.status === '人工确认'} onClick={() => selectedRisk && runAction(`/api/risks/${selectedRisk.id}/review`, `${selectedRisk.id} 已人工确认`)}><ClipboardCheck aria-hidden="true" />{selectedRisk?.status === '人工确认' ? '事件已确认' : '确认风险事件'}</button></section>
+            <section className="inspector-section queue-section"><div className="section-heading"><p className="section-kicker">处置顺序</p><span>{state.risks.length} 项</span></div><div className="risk-queue">{state.risks.map((risk) => <button key={risk.id} type="button" aria-pressed={selectedRisk?.id === risk.id} onClick={() => setSelectedRiskId(risk.id)}><i className={riskClass(risk.severity)} /><span><b>{risk.id} · {risk.name}</b><small>{risk.assigned ?? '等待分派'} · {risk.status}</small></span><strong>{formatPercent(risk.score)}</strong><ChevronRight aria-hidden="true" /></button>)}</div></section>
+          </>}
 
-        {activeTab === '风险复核' && <section className="detail-grid"><section className="panel risk-table-panel"><div className="panel-head"><div><p className="eyebrow">AI 证据融合</p><h1>风险复核队列</h1></div><span className="muted">评分由 RGB、热差与信号频域特征合成</span></div><div className="table-scroll"><table><thead><tr><th>事件</th><th>类型</th><th>融合评分</th><th>状态</th><th>操作</th></tr></thead><tbody>{state.risks.map((risk) => <tr key={risk.id}><td><strong>{risk.id}</strong><span>{risk.name}</span></td><td><span className={`severity ${riskClass(risk.severity)}`}>{risk.severity}风险</span><small>{risk.kind}</small></td><td className="mono">{formatPercent(risk.score)}</td><td>{risk.status}<small>{risk.assigned ?? '等待分派'}</small></td><td><button type="button" className="text-button" disabled={isPending} onClick={() => runAction(`/api/risks/${risk.id}/review`, `${risk.id} 已人工确认`)}>复核<ChevronRight aria-hidden="true" /></button></td></tr>)}</tbody></table></div></section><section className="panel evidence-panel"><p className="eyebrow">当前证据</p><h2>{focusRisk?.id} 频域时间序列</h2>{focusRisk && <SignalChart signal={focusRisk.evidence.signal} />}<dl><div><dt>边缘能量</dt><dd>{formatPercent(focusRisk?.evidence.edge_energy ?? 0)}</dd></div><div><dt>热成像温差</dt><dd>{focusRisk?.evidence.thermal_delta_c ?? 0}°C</dd></div><div><dt>融合阈值</dt><dd>65%</dd></div></dl><p className="muted">这是可解释的软件推演特征，不代表真实坝体诊断结论。</p></section></section>}
+          {activeView === 'risks' && <>
+            <section className="inspector-section">{riskInspector}{selectedRisk && <SignalChart signal={selectedRisk.evidence.signal} />}<p className="data-note">可解释特征用于软件推演，不代表真实坝体诊断结论。</p></section>
+            <section className="inspector-section"><div className="section-heading"><p className="section-kicker">风险队列</p><span>{state.risks.length} 项</span></div><div className="risk-queue">{state.risks.map((risk) => <button key={risk.id} type="button" aria-pressed={selectedRisk?.id === risk.id} onClick={() => setSelectedRiskId(risk.id)}><i className={riskClass(risk.severity)} /><span><b>{risk.id} · {risk.kind}</b><small>{risk.status}</small></span><strong>{formatPercent(risk.score)}</strong><ChevronRight aria-hidden="true" /></button>)}</div></section>
+          </>}
 
-        {activeTab === '协同控制' && <section className="detail-grid"><section className="panel coordinator-panel"><div className="panel-head"><div><p className="eyebrow">空地协同控制</p><h1>分派与规划状态</h1></div><span className="control-badge mono">{state.last_control.method} 速度窗</span></div><div className="flow-list"><div><span>01</span><article><h2>空中扫描</h2><p>UAV 执行面状覆盖，提交表观与热异常候选。</p></article><strong>{state.agents[0].mode}</strong></div><div><span>02</span><article><h2>最小代价分派</h2><p>以任务距离与融合风险评分构建代价矩阵，完成匹配。</p></article><strong>{state.risks.filter((risk) => risk.status === '已分派').length} 已分派</strong></div><div><span>03</span><article><h2>地面复核</h2><p>A* 生成全局路径，DWA 根据障碍密度更新局部速度。</p></article><strong>{state.last_control.clearance_cells} 格净空</strong></div></div><div className="fault-actions"><p>故障推演</p>{faultOptions.map(([kind, label]) => <button key={kind} type="button" className="button secondary" disabled={isPending} onClick={() => runAction(`/api/fault?kind=${kind}`, `${label}已注入`)}><AlertTriangle aria-hidden="true" />{label}</button>)}</div></section><section className="panel mesh-panel"><p className="eyebrow">通信韧性</p><h2>{state.mesh.mode}</h2><div className="mesh-gauge"><strong>{state.mesh.health}%</strong><span>健康度</span></div><p className="muted">中继节点：{state.mesh.relay}</p><ul role="list"><li><CircleCheck aria-hidden="true" />自动发现邻居节点</li><li><CircleCheck aria-hidden="true" />链路衰减时启用缓存</li><li><CircleCheck aria-hidden="true" />风险事件保留确认轨迹</li></ul></section></section>}
+          {activeView === 'coordination' && <>
+            <section className="inspector-section"><div className="inspector-title"><div><p className="section-kicker">通信韧性</p><h2>{state.mesh.mode}</h2></div><Radio aria-hidden="true" /></div><div className="mesh-readout"><strong>{state.mesh.health}%</strong><span>链路健康度 · 中继 {state.mesh.relay}</span><i><em style={{ width: `${state.mesh.health}%` }} /></i></div><ul className="check-list" role="list"><li><CircleCheck aria-hidden="true" />自动发现邻居节点</li><li><CircleCheck aria-hidden="true" />弱链路启用中继与缓存</li><li><CircleCheck aria-hidden="true" />风险事件保留确认轨迹</li></ul></section>
+            <section className="inspector-section"><div className="section-heading"><p className="section-kicker">控制链路</p><span>{state.last_control.method}</span></div><div className="control-facts"><span><Route aria-hidden="true" /><b>A*</b><small>全局路径</small></span><span><Waves aria-hidden="true" /><b>{state.last_control.heading_deg}°</b><small>当前航向</small></span><span><Gauge aria-hidden="true" /><b>{state.last_control.speed_mps}</b><small>速度 m/s</small></span></div></section>
+            <section className="inspector-section"><p className="section-kicker">故障推演</p><div className="fault-grid">{faultOptions.map(([kind, label]) => <button key={kind} type="button" disabled={isPending} onClick={() => runAction(`/api/fault?kind=${kind}`, `${label}已注入`)}><AlertTriangle aria-hidden="true" />{label}</button>)}</div></section>
+          </>}
 
-        {activeTab === '任务记录' && <section className="detail-grid"><section className="panel timeline-panel"><div className="panel-head"><div><p className="eyebrow">任务回放</p><h1>控制事件记录</h1></div><button type="button" className="button secondary" disabled={isPending} onClick={() => runAction('/api/simulation/tick', '手动推进一个控制周期')}><Activity aria-hidden="true" />推进一周期</button></div><ol className="timeline" role="list">{state.timeline.map((item, index) => <li key={`${item.time}-${index}`} className={item.level}><time>{item.time}</time><span /><p>{item.text}</p></li>)}</ol></section><section className="panel report-panel"><p className="eyebrow">版本边界</p><h2>V1.0.0 软件能力</h2><ul role="list"><li><CircleCheck aria-hidden="true" />多源风险融合评分</li><li><CircleCheck aria-hidden="true" />A* 路径与 DWA 局部控制</li><li><CircleCheck aria-hidden="true" />任务分派与链路故障推演</li></ul><p className="muted">该版本用于数字孪生、算法联调和界面演示；不连接真实硬件，不替代工程检测与安全决策。</p></section></section>}
+          {activeView === 'history' && <>
+            <section className="inspector-section"><div className="inspector-title"><div><p className="section-kicker">任务回放</p><h2>控制事件记录</h2></div><button type="button" className="icon-button" aria-label="推进一个控制周期" title="推进一个控制周期" disabled={isPending} onClick={() => runAction('/api/simulation/tick', '手动推进一个控制周期')}><Activity aria-hidden="true" /></button></div><ol className="timeline" role="list">{state.timeline.map((item, index) => <li key={`${item.time}-${index}`} className={item.level}><time>{item.time}</time><span /><p>{item.text}</p></li>)}</ol></section>
+            <section className="inspector-section boundary"><p className="section-kicker">系统边界</p><p>当前版本用于数字孪生、算法联调和界面演示；不连接真实硬件，不替代工程检测与安全决策。</p></section>
+          </>}
+        </aside>
       </main>
 
-      <footer><span>V1.0.0 · 软件仿真版</span><span role="status" aria-live="polite">{error || message}</span><span>演示数据仅用于算法与界面联调</span></footer>
+      <footer className="statusbar"><span><span className={`live-dot ${isRunning ? 'active' : ''}`} />{isRunning ? '自动推进开启 · 4 秒/周期' : '自动推进已停止'}</span><span role="status" aria-live="polite">{error || message}</span><span><Clock3 aria-hidden="true" />{state.mission.updated_at}</span><span>V1.1.0 · 软件仿真版</span></footer>
     </div>
   )
 }

@@ -1,0 +1,38 @@
+[
+  {
+    "id": "routine-inspection",
+    "name_zh": "日常巡检",
+    "name_en": "Routine inspection",
+    "description_zh": "正常通信条件下执行覆盖扫描和地面复核。",
+    "description_en": "Coverage scan and ground verification under normal links.",
+    "risk_bias": 0.46,
+    "defaults": {"risk_count": 4, "obstacle_count": 6, "link_quality": 94}
+  },
+  {
+    "id": "rainfall-seepage",
+    "name_zh": "降雨渗漏",
+    "name_en": "Rainfall seepage",
+    "description_zh": "增加热异常和时序变化，优先调度高风险点。",
+    "description_en": "Raises thermal and signal anomalies and prioritizes high-risk locations.",
+    "risk_bias": 0.67,
+    "defaults": {"risk_count": 6, "obstacle_count": 9, "link_quality": 86}
+  },
+  {
+    "id": "link-degradation",
+    "name_zh": "通信衰减",
+    "name_en": "Link degradation",
+    "description_zh": "链路逐步下降，无人机转为中继并触发任务重分配。",
+    "description_en": "Degrades links until the UAV relays and ground tasks are reassigned.",
+    "risk_bias": 0.54,
+    "defaults": {"risk_count": 5, "obstacle_count": 7, "link_quality": 78}
+  },
+  {
+    "id": "dynamic-obstacle",
+    "name_zh": "动态障碍",
+    "name_en": "Dynamic obstacle",
+    "description_zh": "执行途中出现障碍，展示 DWA 避障和 A* 重规划。",
+    "description_en": "Introduces an obstacle during execution to show DWA avoidance and A* replanning.",
+    "risk_bias": 0.58,
+    "defaults": {"risk_count": 5, "obstacle_count": 10, "link_quality": 90}
+  }
+]

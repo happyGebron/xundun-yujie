@@ -1,0 +1,20 @@
+name: xundun-yujie
+services:
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      XUNDUN_RUNTIME_DIR: /app/runtime
+      XUNDUN_FRONTEND_DIST: /app/frontend-dist
+    volumes:
+      - xundun-runtime:/app/runtime
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+volumes:
+  xundun-runtime:
